@@ -1,41 +1,134 @@
-=== Test 1: Simple integer literal ===
-$ cat test/37.snek
-37
+=== Test 1: Integer literal (tagged) ===
+$ cat test/simple.snek
+42
+$ cargo run -- test/simple.snek test/simple.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/simple.snek test/simple.s`
 
-$ cargo run -- test/37.snek test/37.s
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.03s
-     Running `target/debug/adder test/37.snek test/37.s`
-
-$ cat test/37.s
+$ cat test/simple.s
 section .text
+extern snek_error
 global our_code_starts_here
 our_code_starts_here:
-  mov rax, 37
+  mov [rsp-8], rdi
+  mov rax, 84
   ret
 
-$ make test/37.run
-nasm -f macho64 test/37.s -o runtime/our_code.o
+$ make test/simple.run
+nasm -f macho64 test/simple.s -o runtime/our_code.o
 ar rcs runtime/libour_code.a runtime/our_code.o
-rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/37.run
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/simple.run
 
-$ ./test/37.run
-37
+$ ./test/simple.run false
+42
 
-=== Test 2: Nested add1 operations ===
+=== Test 2: Boolean literal — true ===
+$ cat test/bool_true.snek
+true
+$ cargo run -- test/bool_true.snek test/bool_true.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/bool_true.snek test/bool_true.s`
+
+$ cat test/bool_true.s
+section .text
+extern snek_error
+global our_code_starts_here
+our_code_starts_here:
+  mov [rsp-8], rdi
+  mov rax, 3
+  ret
+
+$ make test/bool_true.run
+nasm -f macho64 test/bool_true.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/bool_true.run
+
+$ ./test/bool_true.run false
+true
+
+=== Test 3: Boolean literal — false ===
+$ cat test/bool_false.snek
+false
+$ cargo run -- test/bool_false.snek test/bool_false.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/bool_false.snek test/bool_false.s`
+
+$ cat test/bool_false.s
+section .text
+extern snek_error
+global our_code_starts_here
+our_code_starts_here:
+  mov [rsp-8], rdi
+  mov rax, 1
+  ret
+
+$ make test/bool_false.run
+nasm -f macho64 test/bool_false.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/bool_false.run
+
+$ ./test/bool_false.run false
+false
+
+=== Test 4: add1 with type check ===
 $ cat test/add.snek
 (add1 (add1 5))
 
 $ cargo run -- test/add.snek test/add.s
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
-     Running `target/debug/adder test/add.snek test/add.s`
+     Running `target/debug/cobra test/add.snek test/add.s`
 
 $ cat test/add.s
 section .text
+extern snek_error
 global our_code_starts_here
 our_code_starts_here:
-  mov rax, 5
-  add rax, 1
-  add rax, 1
+  mov [rsp-8], rdi
+  mov rax, 10
+  test rax, 1
+  jz ok_num_1
+  mov rdi, 1
+  jmp snek_error
+  ok_num_1:
+  add rax, 2
+  jno ok_no_ov64_2
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov64_2:
+  mov rbx, 4294967294
+  cmp rax, rbx
+  jle ok_no_ov_hi_3
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_hi_3:
+  mov rbx, -4294967296
+  cmp rax, rbx
+  jge ok_no_ov_lo_4
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_lo_4:
+  test rax, 1
+  jz ok_num_5
+  mov rdi, 1
+  jmp snek_error
+  ok_num_5:
+  add rax, 2
+  jno ok_no_ov64_6
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov64_6:
+  mov rbx, 4294967294
+  cmp rax, rbx
+  jle ok_no_ov_hi_7
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_hi_7:
+  mov rbx, -4294967296
+  cmp rax, rbx
+  jge ok_no_ov_lo_8
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_lo_8:
   ret
 
 $ make test/add.run
@@ -43,119 +136,1332 @@ nasm -f macho64 test/add.s -o runtime/our_code.o
 ar rcs runtime/libour_code.a runtime/our_code.o
 rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/add.run
 
-$ ./test/add.run
+$ ./test/add.run false
 7
 
-=== Test 3: Sub1 operation ===
-$ cat test/sub.snek
-(sub1 10)
-
-$ cargo run -- test/sub.snek test/sub.s
+=== Test 5: negate ===
+$ cat test/negate.snek
+(negate 5)
+$ cargo run -- test/negate.snek test/negate.s
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
-     Running `target/debug/adder test/sub.snek test/sub.s`
+     Running `target/debug/cobra test/negate.snek test/negate.s`
 
-$ cat test/sub.s
+$ cat test/negate.s
 section .text
+extern snek_error
 global our_code_starts_here
 our_code_starts_here:
+  mov [rsp-8], rdi
   mov rax, 10
-  sub rax, 1
+  test rax, 1
+  jz ok_num_1
+  mov rdi, 1
+  jmp snek_error
+  ok_num_1:
+  neg rax
+  jno ok_no_ov64_2
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov64_2:
+  mov rbx, 4294967294
+  cmp rax, rbx
+  jle ok_no_ov_hi_3
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_hi_3:
+  mov rbx, -4294967296
+  cmp rax, rbx
+  jge ok_no_ov_lo_4
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_lo_4:
   ret
 
-$ make test/sub.run
-nasm -f macho64 test/sub.s -o runtime/our_code.o
+$ make test/negate.run
+nasm -f macho64 test/negate.s -o runtime/our_code.o
 ar rcs runtime/libour_code.a runtime/our_code.o
-rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/sub.run
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/negate.run
 
-$ ./test/sub.run
+$ ./test/negate.run false
+-5
+
+=== Test 6: isnum on number ===
+$ cat test/isnum.snek
+(isnum 5)
+$ cargo run -- test/isnum.snek test/isnum.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/isnum.snek test/isnum.s`
+
+$ cat test/isnum.s
+section .text
+extern snek_error
+global our_code_starts_here
+our_code_starts_here:
+  mov [rsp-8], rdi
+  mov rax, 10
+  and rax, 1
+  cmp rax, 0
+  mov rax, 3
+  je isnum_end_1
+  mov rax, 1
+  isnum_end_1:
+  ret
+
+$ make test/isnum.run
+nasm -f macho64 test/isnum.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/isnum.run
+
+$ ./test/isnum.run false
+true
+
+=== Test 7: isnum on boolean → false ===
+$ cat test/isnum_bool.snek
+(isnum true)
+$ cargo run -- test/isnum_bool.snek test/isnum_bool.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/isnum_bool.snek test/isnum_bool.s`
+
+$ cat test/isnum_bool.s
+section .text
+extern snek_error
+global our_code_starts_here
+our_code_starts_here:
+  mov [rsp-8], rdi
+  mov rax, 3
+  and rax, 1
+  cmp rax, 0
+  mov rax, 3
+  je isnum_end_1
+  mov rax, 1
+  isnum_end_1:
+  ret
+
+$ make test/isnum_bool.run
+nasm -f macho64 test/isnum_bool.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/isnum_bool.run
+
+$ ./test/isnum_bool.run false
+false
+
+=== Test 8: isbool on boolean ===
+$ cat test/isbool.snek
+(isbool true)
+$ cargo run -- test/isbool.snek test/isbool.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/isbool.snek test/isbool.s`
+
+$ cat test/isbool.s
+section .text
+extern snek_error
+global our_code_starts_here
+our_code_starts_here:
+  mov [rsp-8], rdi
+  mov rax, 3
+  and rax, 1
+  cmp rax, 1
+  mov rax, 3
+  je isbool_end_1
+  mov rax, 1
+  isbool_end_1:
+  ret
+
+$ make test/isbool.run
+nasm -f macho64 test/isbool.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/isbool.run
+
+$ ./test/isbool.run false
+true
+
+=== Test 9: isbool on number → false ===
+$ cat test/isbool_num.snek
+(isbool 5)
+$ cargo run -- test/isbool_num.snek test/isbool_num.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/isbool_num.snek test/isbool_num.s`
+
+$ cat test/isbool_num.s
+section .text
+extern snek_error
+global our_code_starts_here
+our_code_starts_here:
+  mov [rsp-8], rdi
+  mov rax, 10
+  and rax, 1
+  cmp rax, 1
+  mov rax, 3
+  je isbool_end_1
+  mov rax, 1
+  isbool_end_1:
+  ret
+
+$ make test/isbool_num.run
+nasm -f macho64 test/isbool_num.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/isbool_num.run
+
+$ ./test/isbool_num.run false
+false
+
+=== Test 10: if true ===
+$ cat test/if_true.snek
+(if true 5 10)
+$ cargo run -- test/if_true.snek test/if_true.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/if_true.snek test/if_true.s`
+
+$ cat test/if_true.s
+section .text
+extern snek_error
+global our_code_starts_here
+our_code_starts_here:
+  mov [rsp-8], rdi
+  mov rax, 3
+  cmp rax, 1
+  je if_else_1
+  mov rax, 10
+  jmp if_end_2
+  if_else_1:
+  mov rax, 20
+  if_end_2:
+  ret
+
+$ make test/if_true.run
+nasm -f macho64 test/if_true.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/if_true.run
+
+$ ./test/if_true.run false
+5
+
+=== Test 11: if false ===
+$ cat test/if_false.snek
+(if false 5 10)
+$ cargo run -- test/if_false.snek test/if_false.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/if_false.snek test/if_false.s`
+
+$ cat test/if_false.s
+section .text
+extern snek_error
+global our_code_starts_here
+our_code_starts_here:
+  mov [rsp-8], rdi
+  mov rax, 1
+  cmp rax, 1
+  je if_else_1
+  mov rax, 10
+  jmp if_end_2
+  if_else_1:
+  mov rax, 20
+  if_end_2:
+  ret
+
+$ make test/if_false.run
+nasm -f macho64 test/if_false.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/if_false.run
+
+$ ./test/if_false.run false
+10
+
+=== Test 12: if with number condition (0 is truthy) ===
+$ cat test/if_num_cond.snek
+(if 0 1 2)
+$ cargo run -- test/if_num_cond.snek test/if_num_cond.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/if_num_cond.snek test/if_num_cond.s`
+
+$ cat test/if_num_cond.s
+section .text
+extern snek_error
+global our_code_starts_here
+our_code_starts_here:
+  mov [rsp-8], rdi
+  mov rax, 0
+  cmp rax, 1
+  je if_else_1
+  mov rax, 2
+  jmp if_end_2
+  if_else_1:
+  mov rax, 4
+  if_end_2:
+  ret
+
+$ make test/if_num_cond.run
+nasm -f macho64 test/if_num_cond.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/if_num_cond.run
+
+$ ./test/if_num_cond.run false
+1
+
+=== Test 13: Comparison — less than ===
+$ cat test/cmp_less.snek
+(< 3 5)
+$ cargo run -- test/cmp_less.snek test/cmp_less.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/cmp_less.snek test/cmp_less.s`
+
+$ cat test/cmp_less.s
+section .text
+extern snek_error
+global our_code_starts_here
+our_code_starts_here:
+  mov [rsp-8], rdi
+  mov rax, 6
+  mov [rsp-16], rax
+  mov rax, 10
+  test rax, 1
+  jz ok_num_1
+  mov rdi, 1
+  jmp snek_error
+  ok_num_1:
+  mov rbx, [rsp-16]
+  test rbx, 1
+  jz ok_num_2
+  mov rdi, 1
+  jmp snek_error
+  ok_num_2:
+  mov rbx, [rsp-16]
+  cmp rbx, rax
+  mov rax, 3
+  jl cmp_end_3
+  mov rax, 1
+  cmp_end_3:
+  ret
+
+$ make test/cmp_less.run
+nasm -f macho64 test/cmp_less.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/cmp_less.run
+
+$ ./test/cmp_less.run false
+true
+
+=== Test 14: Comparison — equality of numbers ===
+$ cat test/cmp_eq.snek
+(= 42 42)
+$ cargo run -- test/cmp_eq.snek test/cmp_eq.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/cmp_eq.snek test/cmp_eq.s`
+
+$ cat test/cmp_eq.s
+section .text
+extern snek_error
+global our_code_starts_here
+our_code_starts_here:
+  mov [rsp-8], rdi
+  mov rax, 84
+  mov [rsp-16], rax
+  mov rax, 84
+  mov rbx, rax
+  xor rbx, [rsp-16]
+  test rbx, 1
+  jz ok_same_type_1
+  mov rdi, 1
+  jmp snek_error
+  ok_same_type_1:
+  mov rbx, [rsp-16]
+  cmp rbx, rax
+  mov rax, 3
+  je cmp_end_2
+  mov rax, 1
+  cmp_end_2:
+  ret
+
+$ make test/cmp_eq.run
+nasm -f macho64 test/cmp_eq.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/cmp_eq.run
+
+$ ./test/cmp_eq.run false
+true
+
+=== Test 15: Comparison — equality of booleans ===
+$ cat test/eq_bool.snek
+(= true true)
+$ cargo run -- test/eq_bool.snek test/eq_bool.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/eq_bool.snek test/eq_bool.s`
+
+$ cat test/eq_bool.s
+section .text
+extern snek_error
+global our_code_starts_here
+our_code_starts_here:
+  mov [rsp-8], rdi
+  mov rax, 3
+  mov [rsp-16], rax
+  mov rax, 3
+  mov rbx, rax
+  xor rbx, [rsp-16]
+  test rbx, 1
+  jz ok_same_type_1
+  mov rdi, 1
+  jmp snek_error
+  ok_same_type_1:
+  mov rbx, [rsp-16]
+  cmp rbx, rax
+  mov rax, 3
+  je cmp_end_2
+  mov rax, 1
+  cmp_end_2:
+  ret
+
+$ make test/eq_bool.run
+nasm -f macho64 test/eq_bool.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/eq_bool.run
+
+$ ./test/eq_bool.run false
+true
+
+=== Test 16: Block — returns last value ===
+$ cat test/block_seq.snek
+(block 1 2 3 4 5)
+$ cargo run -- test/block_seq.snek test/block_seq.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/block_seq.snek test/block_seq.s`
+
+$ cat test/block_seq.s
+section .text
+extern snek_error
+global our_code_starts_here
+our_code_starts_here:
+  mov [rsp-8], rdi
+  mov rax, 2
+  mov rax, 4
+  mov rax, 6
+  mov rax, 8
+  mov rax, 10
+  ret
+
+$ make test/block_seq.run
+nasm -f macho64 test/block_seq.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/block_seq.run
+
+$ ./test/block_seq.run false
+5
+
+=== Test 17: Let + set! mutation ===
+$ cat test/set_block.snek
+(let ((x 5)) (block (set! x 10) x))
+$ cargo run -- test/set_block.snek test/set_block.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/set_block.snek test/set_block.s`
+
+$ cat test/set_block.s
+section .text
+extern snek_error
+global our_code_starts_here
+our_code_starts_here:
+  mov [rsp-8], rdi
+  mov rax, 10
+  mov [rsp-16], rax
+  mov rax, 20
+  mov [rsp-16], rax
+  mov rax, [rsp-16]
+  ret
+
+$ make test/set_block.run
+nasm -f macho64 test/set_block.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/set_block.run
+
+$ ./test/set_block.run false
+10
+
+=== Test 18: set! returns assigned value ===
+$ cat test/set_returns_val.snek
+(let ((x 0)) (+ (set! x 10) x))
+
+$ cargo run -- test/set_returns_val.snek test/set_returns_val.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/set_returns_val.snek test/set_returns_val.s`
+
+$ cat test/set_returns_val.s
+section .text
+extern snek_error
+global our_code_starts_here
+our_code_starts_here:
+  mov [rsp-8], rdi
+  mov rax, 0
+  mov [rsp-16], rax
+  mov rax, 20
+  mov [rsp-16], rax
+  mov [rsp-24], rax
+  mov rax, [rsp-16]
+  test rax, 1
+  jz ok_num_1
+  mov rdi, 1
+  jmp snek_error
+  ok_num_1:
+  mov rbx, [rsp-24]
+  test rbx, 1
+  jz ok_num_2
+  mov rdi, 1
+  jmp snek_error
+  ok_num_2:
+  add rax, [rsp-24]
+  jno ok_no_ov64_3
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov64_3:
+  mov rbx, 4294967294
+  cmp rax, rbx
+  jle ok_no_ov_hi_4
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_hi_4:
+  mov rbx, -4294967296
+  cmp rax, rbx
+  jge ok_no_ov_lo_5
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_lo_5:
+  ret
+
+$ make test/set_returns_val.run
+nasm -f macho64 test/set_returns_val.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/set_returns_val.run
+
+$ ./test/set_returns_val.run false
+20
+
+=== Test 19: Loop with break ===
+$ cat test/loop_count.snek
+(let ((x 0))
+  (loop
+    (if (= x 10)
+      (break x)
+      (set! x (+ x 1)))))
+$ cargo run -- test/loop_count.snek test/loop_count.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/loop_count.snek test/loop_count.s`
+
+$ cat test/loop_count.s
+section .text
+extern snek_error
+global our_code_starts_here
+our_code_starts_here:
+  mov [rsp-8], rdi
+  mov rax, 0
+  mov [rsp-16], rax
+  loop_start_1:
+  mov rax, [rsp-16]
+  mov [rsp-24], rax
+  mov rax, 20
+  mov rbx, rax
+  xor rbx, [rsp-24]
+  test rbx, 1
+  jz ok_same_type_5
+  mov rdi, 1
+  jmp snek_error
+  ok_same_type_5:
+  mov rbx, [rsp-24]
+  cmp rbx, rax
+  mov rax, 3
+  je cmp_end_6
+  mov rax, 1
+  cmp_end_6:
+  cmp rax, 1
+  je if_else_3
+  mov rax, [rsp-16]
+  jmp loop_end_2
+  jmp if_end_4
+  if_else_3:
+  mov rax, [rsp-16]
+  mov [rsp-24], rax
+  mov rax, 2
+  test rax, 1
+  jz ok_num_7
+  mov rdi, 1
+  jmp snek_error
+  ok_num_7:
+  mov rbx, [rsp-24]
+  test rbx, 1
+  jz ok_num_8
+  mov rdi, 1
+  jmp snek_error
+  ok_num_8:
+  add rax, [rsp-24]
+  jno ok_no_ov64_9
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov64_9:
+  mov rbx, 4294967294
+  cmp rax, rbx
+  jle ok_no_ov_hi_10
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_hi_10:
+  mov rbx, -4294967296
+  cmp rax, rbx
+  jge ok_no_ov_lo_11
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_lo_11:
+  mov [rsp-16], rax
+  if_end_4:
+  jmp loop_start_1
+  loop_end_2:
+  ret
+
+$ make test/loop_count.run
+nasm -f macho64 test/loop_count.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/loop_count.run
+
+$ ./test/loop_count.run false
+10
+
+=== Test 20: Loop — sum 1..5 ===
+$ cat test/loop_sum.snek
+(let ((sum 0) (i 1))
+  (loop
+    (if (> i 5)
+      (break sum)
+      (block
+        (set! sum (+ sum i))
+        (set! i (+ i 1))))))
+$ cargo run -- test/loop_sum.snek test/loop_sum.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/loop_sum.snek test/loop_sum.s`
+
+$ cat test/loop_sum.s
+section .text
+extern snek_error
+global our_code_starts_here
+our_code_starts_here:
+  mov [rsp-8], rdi
+  mov rax, 0
+  mov [rsp-16], rax
+  mov rax, 2
+  mov [rsp-24], rax
+  loop_start_1:
+  mov rax, [rsp-24]
+  mov [rsp-32], rax
+  mov rax, 10
+  test rax, 1
+  jz ok_num_5
+  mov rdi, 1
+  jmp snek_error
+  ok_num_5:
+  mov rbx, [rsp-32]
+  test rbx, 1
+  jz ok_num_6
+  mov rdi, 1
+  jmp snek_error
+  ok_num_6:
+  mov rbx, [rsp-32]
+  cmp rbx, rax
+  mov rax, 3
+  jg cmp_end_7
+  mov rax, 1
+  cmp_end_7:
+  cmp rax, 1
+  je if_else_3
+  mov rax, [rsp-16]
+  jmp loop_end_2
+  jmp if_end_4
+  if_else_3:
+  mov rax, [rsp-16]
+  mov [rsp-32], rax
+  mov rax, [rsp-24]
+  test rax, 1
+  jz ok_num_8
+  mov rdi, 1
+  jmp snek_error
+  ok_num_8:
+  mov rbx, [rsp-32]
+  test rbx, 1
+  jz ok_num_9
+  mov rdi, 1
+  jmp snek_error
+  ok_num_9:
+  add rax, [rsp-32]
+  jno ok_no_ov64_10
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov64_10:
+  mov rbx, 4294967294
+  cmp rax, rbx
+  jle ok_no_ov_hi_11
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_hi_11:
+  mov rbx, -4294967296
+  cmp rax, rbx
+  jge ok_no_ov_lo_12
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_lo_12:
+  mov [rsp-16], rax
+  mov rax, [rsp-24]
+  mov [rsp-32], rax
+  mov rax, 2
+  test rax, 1
+  jz ok_num_13
+  mov rdi, 1
+  jmp snek_error
+  ok_num_13:
+  mov rbx, [rsp-32]
+  test rbx, 1
+  jz ok_num_14
+  mov rdi, 1
+  jmp snek_error
+  ok_num_14:
+  add rax, [rsp-32]
+  jno ok_no_ov64_15
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov64_15:
+  mov rbx, 4294967294
+  cmp rax, rbx
+  jle ok_no_ov_hi_16
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_hi_16:
+  mov rbx, -4294967296
+  cmp rax, rbx
+  jge ok_no_ov_lo_17
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_lo_17:
+  mov [rsp-24], rax
+  if_end_4:
+  jmp loop_start_1
+  loop_end_2:
+  ret
+
+$ make test/loop_sum.run
+nasm -f macho64 test/loop_sum.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/loop_sum.run
+
+$ ./test/loop_sum.run false
+15
+
+=== Test 21: Nested loops with break ===
+$ cat test/nested_loop_break.snek
+(let ((outer 0))
+  (loop
+    (block
+      (set! outer (+ outer (loop (break 3))))
+      (if (>= outer 9) (break outer) outer))))
+
+$ cargo run -- test/nested_loop_break.snek test/nested_loop_break.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/nested_loop_break.snek test/nested_loop_break.s`
+
+$ cat test/nested_loop_break.s
+section .text
+extern snek_error
+global our_code_starts_here
+our_code_starts_here:
+  mov [rsp-8], rdi
+  mov rax, 0
+  mov [rsp-16], rax
+  loop_start_1:
+  mov rax, [rsp-16]
+  mov [rsp-24], rax
+  loop_start_3:
+  mov rax, 6
+  jmp loop_end_4
+  jmp loop_start_3
+  loop_end_4:
+  test rax, 1
+  jz ok_num_5
+  mov rdi, 1
+  jmp snek_error
+  ok_num_5:
+  mov rbx, [rsp-24]
+  test rbx, 1
+  jz ok_num_6
+  mov rdi, 1
+  jmp snek_error
+  ok_num_6:
+  add rax, [rsp-24]
+  jno ok_no_ov64_7
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov64_7:
+  mov rbx, 4294967294
+  cmp rax, rbx
+  jle ok_no_ov_hi_8
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_hi_8:
+  mov rbx, -4294967296
+  cmp rax, rbx
+  jge ok_no_ov_lo_9
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_lo_9:
+  mov [rsp-16], rax
+  mov rax, [rsp-16]
+  mov [rsp-24], rax
+  mov rax, 18
+  test rax, 1
+  jz ok_num_12
+  mov rdi, 1
+  jmp snek_error
+  ok_num_12:
+  mov rbx, [rsp-24]
+  test rbx, 1
+  jz ok_num_13
+  mov rdi, 1
+  jmp snek_error
+  ok_num_13:
+  mov rbx, [rsp-24]
+  cmp rbx, rax
+  mov rax, 3
+  jge cmp_end_14
+  mov rax, 1
+  cmp_end_14:
+  cmp rax, 1
+  je if_else_10
+  mov rax, [rsp-16]
+  jmp loop_end_2
+  jmp if_end_11
+  if_else_10:
+  mov rax, [rsp-16]
+  if_end_11:
+  jmp loop_start_1
+  loop_end_2:
+  ret
+
+$ make test/nested_loop_break.run
+nasm -f macho64 test/nested_loop_break.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/nested_loop_break.run
+
+$ ./test/nested_loop_break.run false
 9
 
-=== Test 4: Negate positive number ===
-$ cat test/neg1.snek
-(negate 7)
-
-$ cargo run -- test/neg1.snek test/neg1.s
+=== Test 22: input argument (passing 5) ===
+$ cat test/input_val.snek
+input
+$ cargo run -- test/input_val.snek test/input_val.s
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
-     Running `target/debug/adder test/neg1.snek test/neg1.s`
+     Running `target/debug/cobra test/input_val.snek test/input_val.s`
 
-$ cat test/neg1.s
+$ cat test/input_val.s
 section .text
+extern snek_error
 global our_code_starts_here
 our_code_starts_here:
-  mov rax, 7
-  neg rax
+  mov [rsp-8], rdi
+  mov rax, [rsp-8]
   ret
 
-$ make test/neg1.run
-nasm -f macho64 test/neg1.s -o runtime/our_code.o
+$ make test/input_val.run
+nasm -f macho64 test/input_val.s -o runtime/our_code.o
 ar rcs runtime/libour_code.a runtime/our_code.o
-rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/neg1.run
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/input_val.run
 
-$ ./test/neg1.run
--7
+$ ./test/input_val.run 5
+5
 
-=== Test 5: Complex nested expression ===
-$ cat test/nested1.snek
-(add1 (sub1 (add1 5)))
-
-$ cargo run -- test/nested1.snek test/nested1.s
+=== Test 23: input in arithmetic ===
+$ cat test/input_add.snek
+(+ input 10)
+$ cargo run -- test/input_add.snek test/input_add.s
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
-     Running `target/debug/adder test/nested1.snek test/nested1.s`
+     Running `target/debug/cobra test/input_add.snek test/input_add.s`
 
-$ cat test/nested1.s
+$ cat test/input_add.s
 section .text
+extern snek_error
 global our_code_starts_here
 our_code_starts_here:
-  mov rax, 5
-  add rax, 1
-  sub rax, 1
-  add rax, 1
+  mov [rsp-8], rdi
+  mov rax, [rsp-8]
+  mov [rsp-16], rax
+  mov rax, 20
+  test rax, 1
+  jz ok_num_1
+  mov rdi, 1
+  jmp snek_error
+  ok_num_1:
+  mov rbx, [rsp-16]
+  test rbx, 1
+  jz ok_num_2
+  mov rdi, 1
+  jmp snek_error
+  ok_num_2:
+  add rax, [rsp-16]
+  jno ok_no_ov64_3
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov64_3:
+  mov rbx, 4294967294
+  cmp rax, rbx
+  jle ok_no_ov_hi_4
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_hi_4:
+  mov rbx, -4294967296
+  cmp rax, rbx
+  jge ok_no_ov_lo_5
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_lo_5:
   ret
 
-$ make test/nested1.run
-nasm -f macho64 test/nested1.s -o runtime/our_code.o
+$ make test/input_add.run
+nasm -f macho64 test/input_add.s -o runtime/our_code.o
 ar rcs runtime/libour_code.a runtime/our_code.o
-rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/nested1.run
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/input_add.run
 
-$ ./test/nested1.run
-6
+$ ./test/input_add.run 5
+15
 
-=== Test 6: Negative number literal ===
-$ cat test/negative.snek
--10
-
-$ cargo run -- test/negative.snek test/negative.s
+=== Test 24: Deeply nested if ===
+$ cat test/deep_if.snek
+(if (< 1 2)
+  (if (> 5 3)
+    (if (= 7 7)
+      (if (<= 0 0)
+        42
+        0)
+      0)
+    0)
+  0)
+$ cargo run -- test/deep_if.snek test/deep_if.s
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
-     Running `target/debug/adder test/negative.snek test/negative.s`
+     Running `target/debug/cobra test/deep_if.snek test/deep_if.s`
 
-$ cat test/negative.s
+$ cat test/deep_if.s
 section .text
+extern snek_error
 global our_code_starts_here
 our_code_starts_here:
-  mov rax, -10
+  mov [rsp-8], rdi
+  mov rax, 2
+  mov [rsp-16], rax
+  mov rax, 4
+  test rax, 1
+  jz ok_num_3
+  mov rdi, 1
+  jmp snek_error
+  ok_num_3:
+  mov rbx, [rsp-16]
+  test rbx, 1
+  jz ok_num_4
+  mov rdi, 1
+  jmp snek_error
+  ok_num_4:
+  mov rbx, [rsp-16]
+  cmp rbx, rax
+  mov rax, 3
+  jl cmp_end_5
+  mov rax, 1
+  cmp_end_5:
+  cmp rax, 1
+  je if_else_1
+  mov rax, 10
+  mov [rsp-16], rax
+  mov rax, 6
+  test rax, 1
+  jz ok_num_8
+  mov rdi, 1
+  jmp snek_error
+  ok_num_8:
+  mov rbx, [rsp-16]
+  test rbx, 1
+  jz ok_num_9
+  mov rdi, 1
+  jmp snek_error
+  ok_num_9:
+  mov rbx, [rsp-16]
+  cmp rbx, rax
+  mov rax, 3
+  jg cmp_end_10
+  mov rax, 1
+  cmp_end_10:
+  cmp rax, 1
+  je if_else_6
+  mov rax, 14
+  mov [rsp-16], rax
+  mov rax, 14
+  mov rbx, rax
+  xor rbx, [rsp-16]
+  test rbx, 1
+  jz ok_same_type_13
+  mov rdi, 1
+  jmp snek_error
+  ok_same_type_13:
+  mov rbx, [rsp-16]
+  cmp rbx, rax
+  mov rax, 3
+  je cmp_end_14
+  mov rax, 1
+  cmp_end_14:
+  cmp rax, 1
+  je if_else_11
+  mov rax, 0
+  mov [rsp-16], rax
+  mov rax, 0
+  test rax, 1
+  jz ok_num_17
+  mov rdi, 1
+  jmp snek_error
+  ok_num_17:
+  mov rbx, [rsp-16]
+  test rbx, 1
+  jz ok_num_18
+  mov rdi, 1
+  jmp snek_error
+  ok_num_18:
+  mov rbx, [rsp-16]
+  cmp rbx, rax
+  mov rax, 3
+  jle cmp_end_19
+  mov rax, 1
+  cmp_end_19:
+  cmp rax, 1
+  je if_else_15
+  mov rax, 84
+  jmp if_end_16
+  if_else_15:
+  mov rax, 0
+  if_end_16:
+  jmp if_end_12
+  if_else_11:
+  mov rax, 0
+  if_end_12:
+  jmp if_end_7
+  if_else_6:
+  mov rax, 0
+  if_end_7:
+  jmp if_end_2
+  if_else_1:
+  mov rax, 0
+  if_end_2:
   ret
 
-$ make test/negative.run
-nasm -f macho64 test/negative.s -o runtime/our_code.o
+$ make test/deep_if.run
+nasm -f macho64 test/deep_if.s -o runtime/our_code.o
 ar rcs runtime/libour_code.a runtime/our_code.o
-rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/negative.run
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/deep_if.run
 
-$ ./test/negative.run
--10
+$ ./test/deep_if.run false
+42
 
-=== Test 7: Maximum 32-bit integer ===
+=== Test 25: Chained set! mutations ===
+$ cat test/chain_set_deep.snek
+(let ((x 0))
+  (block
+    (set! x (+ x 1))
+    (set! x (* x 2))
+    (set! x (+ x 1))
+    (set! x (* x 2))
+    (set! x (+ x 1))
+    x))
+
+$ cargo run -- test/chain_set_deep.snek test/chain_set_deep.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/chain_set_deep.snek test/chain_set_deep.s`
+
+$ cat test/chain_set_deep.s
+section .text
+extern snek_error
+global our_code_starts_here
+our_code_starts_here:
+  mov [rsp-8], rdi
+  mov rax, 0
+  mov [rsp-16], rax
+  mov rax, [rsp-16]
+  mov [rsp-24], rax
+  mov rax, 2
+  test rax, 1
+  jz ok_num_1
+  mov rdi, 1
+  jmp snek_error
+  ok_num_1:
+  mov rbx, [rsp-24]
+  test rbx, 1
+  jz ok_num_2
+  mov rdi, 1
+  jmp snek_error
+  ok_num_2:
+  add rax, [rsp-24]
+  jno ok_no_ov64_3
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov64_3:
+  mov rbx, 4294967294
+  cmp rax, rbx
+  jle ok_no_ov_hi_4
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_hi_4:
+  mov rbx, -4294967296
+  cmp rax, rbx
+  jge ok_no_ov_lo_5
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_lo_5:
+  mov [rsp-16], rax
+  mov rax, [rsp-16]
+  mov [rsp-24], rax
+  mov rax, 4
+  test rax, 1
+  jz ok_num_6
+  mov rdi, 1
+  jmp snek_error
+  ok_num_6:
+  mov rbx, [rsp-24]
+  test rbx, 1
+  jz ok_num_7
+  mov rdi, 1
+  jmp snek_error
+  ok_num_7:
+  sar rax, 1
+  imul rax, [rsp-24]
+  jno ok_no_ov64_8
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov64_8:
+  mov rbx, 4294967294
+  cmp rax, rbx
+  jle ok_no_ov_hi_9
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_hi_9:
+  mov rbx, -4294967296
+  cmp rax, rbx
+  jge ok_no_ov_lo_10
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_lo_10:
+  mov [rsp-16], rax
+  mov rax, [rsp-16]
+  mov [rsp-24], rax
+  mov rax, 2
+  test rax, 1
+  jz ok_num_11
+  mov rdi, 1
+  jmp snek_error
+  ok_num_11:
+  mov rbx, [rsp-24]
+  test rbx, 1
+  jz ok_num_12
+  mov rdi, 1
+  jmp snek_error
+  ok_num_12:
+  add rax, [rsp-24]
+  jno ok_no_ov64_13
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov64_13:
+  mov rbx, 4294967294
+  cmp rax, rbx
+  jle ok_no_ov_hi_14
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_hi_14:
+  mov rbx, -4294967296
+  cmp rax, rbx
+  jge ok_no_ov_lo_15
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_lo_15:
+  mov [rsp-16], rax
+  mov rax, [rsp-16]
+  mov [rsp-24], rax
+  mov rax, 4
+  test rax, 1
+  jz ok_num_16
+  mov rdi, 1
+  jmp snek_error
+  ok_num_16:
+  mov rbx, [rsp-24]
+  test rbx, 1
+  jz ok_num_17
+  mov rdi, 1
+  jmp snek_error
+  ok_num_17:
+  sar rax, 1
+  imul rax, [rsp-24]
+  jno ok_no_ov64_18
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov64_18:
+  mov rbx, 4294967294
+  cmp rax, rbx
+  jle ok_no_ov_hi_19
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_hi_19:
+  mov rbx, -4294967296
+  cmp rax, rbx
+  jge ok_no_ov_lo_20
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_lo_20:
+  mov [rsp-16], rax
+  mov rax, [rsp-16]
+  mov [rsp-24], rax
+  mov rax, 2
+  test rax, 1
+  jz ok_num_21
+  mov rdi, 1
+  jmp snek_error
+  ok_num_21:
+  mov rbx, [rsp-24]
+  test rbx, 1
+  jz ok_num_22
+  mov rdi, 1
+  jmp snek_error
+  ok_num_22:
+  add rax, [rsp-24]
+  jno ok_no_ov64_23
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov64_23:
+  mov rbx, 4294967294
+  cmp rax, rbx
+  jle ok_no_ov_hi_24
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_hi_24:
+  mov rbx, -4294967296
+  cmp rax, rbx
+  jge ok_no_ov_lo_25
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_lo_25:
+  mov [rsp-16], rax
+  mov rax, [rsp-16]
+  ret
+
+$ make test/chain_set_deep.run
+nasm -f macho64 test/chain_set_deep.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/chain_set_deep.run
+
+$ ./test/chain_set_deep.run false
+7
+
+=== Test 26: Shadow + set! on outer ===
+$ cat test/shadow_set.snek
+(let ((x 1))
+  (block
+    (let ((x 100)) x)
+    (set! x 42)
+    x))
+
+$ cargo run -- test/shadow_set.snek test/shadow_set.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/shadow_set.snek test/shadow_set.s`
+
+$ cat test/shadow_set.s
+section .text
+extern snek_error
+global our_code_starts_here
+our_code_starts_here:
+  mov [rsp-8], rdi
+  mov rax, 2
+  mov [rsp-16], rax
+  mov rax, 200
+  mov [rsp-24], rax
+  mov rax, [rsp-24]
+  mov rax, 84
+  mov [rsp-16], rax
+  mov rax, [rsp-16]
+  ret
+
+$ make test/shadow_set.run
+nasm -f macho64 test/shadow_set.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/shadow_set.run
+
+$ ./test/shadow_set.run false
+42
+
+=== Test 27: if branch result in arithmetic ===
+$ cat test/if_in_arith.snek
+(+ (if true 1 2) 3)
+
+$ cargo run -- test/if_in_arith.snek test/if_in_arith.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/if_in_arith.snek test/if_in_arith.s`
+
+$ cat test/if_in_arith.s
+section .text
+extern snek_error
+global our_code_starts_here
+our_code_starts_here:
+  mov [rsp-8], rdi
+  mov rax, 3
+  cmp rax, 1
+  je if_else_1
+  mov rax, 2
+  jmp if_end_2
+  if_else_1:
+  mov rax, 4
+  if_end_2:
+  mov [rsp-16], rax
+  mov rax, 6
+  test rax, 1
+  jz ok_num_3
+  mov rdi, 1
+  jmp snek_error
+  ok_num_3:
+  mov rbx, [rsp-16]
+  test rbx, 1
+  jz ok_num_4
+  mov rdi, 1
+  jmp snek_error
+  ok_num_4:
+  add rax, [rsp-16]
+  jno ok_no_ov64_5
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov64_5:
+  mov rbx, 4294967294
+  cmp rax, rbx
+  jle ok_no_ov_hi_6
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_hi_6:
+  mov rbx, -4294967296
+  cmp rax, rbx
+  jge ok_no_ov_lo_7
+  mov rdi, 2
+  jmp snek_error
+  ok_no_ov_lo_7:
+  ret
+
+$ make test/if_in_arith.run
+nasm -f macho64 test/if_in_arith.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/if_in_arith.run
+
+$ ./test/if_in_arith.run false
+4
+
+=== Test 28: Max int boundary ===
 $ cat test/max-int.snek
 2147483647
-
 $ cargo run -- test/max-int.snek test/max-int.s
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
-     Running `target/debug/adder test/max-int.snek test/max-int.s`
+     Running `target/debug/cobra test/max-int.snek test/max-int.s`
 
 $ cat test/max-int.s
 section .text
+extern snek_error
 global our_code_starts_here
 our_code_starts_here:
-  mov rax, 2147483647
+  mov [rsp-8], rdi
+  mov rax, 4294967294
   ret
 
 $ make test/max-int.run
@@ -163,152 +1469,184 @@ nasm -f macho64 test/max-int.s -o runtime/our_code.o
 ar rcs runtime/libour_code.a runtime/our_code.o
 rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/max-int.run
 
-$ ./test/max-int.run
+$ ./test/max-int.run false
 2147483647
 
-=== Test 8: Minimum 32-bit integer ===
-$ cat test/min-int.snek
--2147483648
 
-$ cargo run -- test/min-int.snek test/min-int.s
+═══════════════════════════════════════════════════════════════
+ COMPILE-TIME ERROR TESTS
+═══════════════════════════════════════════════════════════════
+
+=== Test 29: Error — duplicate binding ===
+$ cat test/error/dup_bind.snek
+(let ((x 5) (x 6)) (+ x x))
+
+$ cargo run -- test/error/dup_bind.snek /dev/null
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
-     Running `target/debug/adder test/min-int.snek test/min-int.s`
+     Running `target/debug/cobra test/error/dup_bind.snek /dev/null`
 
-$ cat test/min-int.s
-section .text
-global our_code_starts_here
-our_code_starts_here:
-  mov rax, -2147483648
-  ret
+thread 'main' (985976) panicked at src/main.rs:400:21:
+Duplicate binding
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 
-$ make test/min-int.run
-nasm -f macho64 test/min-int.s -o runtime/our_code.o
-ar rcs runtime/libour_code.a runtime/our_code.o
-rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/min-int.run
+=== Test 30: Error — unbound variable ===
+$ cat test/error/unbound.snek
+(+ x 1)
 
-$ ./test/min-int.run
--2147483648
-
-=== Test 9: Add1 with negative number ===
-$ cat test/add1-neg.snek
-(add1 -5)
-
-$ cargo run -- test/add1-neg.snek test/add1-neg.s
+$ cargo run -- test/error/unbound.snek /dev/null
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
-     Running `target/debug/adder test/add1-neg.snek test/add1-neg.s`
+     Running `target/debug/cobra test/error/unbound.snek /dev/null`
 
-$ cat test/add1-neg.s
-section .text
-global our_code_starts_here
-our_code_starts_here:
-  mov rax, -5
-  add rax, 1
-  ret
+thread 'main' (985998) panicked at src/main.rs:241:21:
+Unbound variable identifier x
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 
-$ make test/add1-neg.run
-nasm -f macho64 test/add1-neg.s -o runtime/our_code.o
-ar rcs runtime/libour_code.a runtime/our_code.o
-rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/add1-neg.run
-
-$ ./test/add1-neg.run
--4
-
-=== Test 10: Negate negative number ===
-$ cat test/negate-neg.snek
-(negate -7)
-
-$ cargo run -- test/negate-neg.snek test/negate-neg.s
+=== Test 31: Error — break outside loop ===
+$ cat test/error/break_outside.snek
+(break 5)
+$ cargo run -- test/error/break_outside.snek /dev/null
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
-     Running `target/debug/adder test/negate-neg.snek test/negate-neg.s`
+     Running `target/debug/cobra test/error/break_outside.snek /dev/null`
 
-$ cat test/negate-neg.s
-section .text
-global our_code_starts_here
-our_code_starts_here:
-  mov rax, -7
-  neg rax
-  ret
+thread 'main' (986019) panicked at src/main.rs:380:21:
+break outside of loop
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 
-$ make test/negate-neg.run
-nasm -f macho64 test/negate-neg.s -o runtime/our_code.o
-ar rcs runtime/libour_code.a runtime/our_code.o
-rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/negate-neg.run
-
-$ ./test/negate-neg.run
-7
-
-=== Test 11: Triple negation ===
-$ cat test/triple-neg.snek
-(negate (negate (negate 2)))
-
-$ cargo run -- test/triple-neg.snek test/triple-neg.s
+=== Test 32: Error — set! on unbound variable ===
+$ cat test/error/set_unbound.snek
+(set! z 5)
+$ cargo run -- test/error/set_unbound.snek /dev/null
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
-     Running `target/debug/adder test/triple-neg.snek test/triple-neg.s`
+     Running `target/debug/cobra test/error/set_unbound.snek /dev/null`
 
-$ cat test/triple-neg.s
-section .text
-global our_code_starts_here
-our_code_starts_here:
-  mov rax, 2
-  neg rax
-  neg rax
-  neg rax
-  ret
+thread 'main' (986040) panicked at src/main.rs:389:21:
+Unbound variable identifier z
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 
-$ make test/triple-neg.run
-nasm -f macho64 test/triple-neg.s -o runtime/our_code.o
-ar rcs runtime/libour_code.a runtime/our_code.o
-rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/triple-neg.run
 
-$ ./test/triple-neg.run
--2
+═══════════════════════════════════════════════════════════════
+ RUNTIME ERROR TESTS
+═══════════════════════════════════════════════════════════════
 
-=== Test 12: Sub1 from zero ===
-$ cat test/sub1-zero.snek
-(sub1 0)
-
-$ cargo run -- test/sub1-zero.snek test/sub1-zero.s
+=== Test 33: Runtime error — (+ true 5) ===
+$ cat test/error/add_bool.snek
+(+ true 5)
+$ cargo run -- test/error/add_bool.snek test/error/add_bool.s
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
-     Running `target/debug/adder test/sub1-zero.snek test/sub1-zero.s`
+     Running `target/debug/cobra test/error/add_bool.snek test/error/add_bool.s`
 
-$ cat test/sub1-zero.s
-section .text
-global our_code_starts_here
-our_code_starts_here:
-  mov rax, 0
-  sub rax, 1
-  ret
-
-$ make test/sub1-zero.run
-nasm -f macho64 test/sub1-zero.s -o runtime/our_code.o
+$ make test/error/add_bool.run
+nasm -f macho64 test/error/add_bool.s -o runtime/our_code.o
 ar rcs runtime/libour_code.a runtime/our_code.o
-rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/sub1-zero.run
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/error/add_bool.run
 
-$ ./test/sub1-zero.run
--1
+$ ./test/error/add_bool.run false
+invalid argument
 
-=== Test 13: Complex nested with max int ===
-$ cat test/big.snek
-(add1 (sub1 (negate 2147483647)))
-
-$ cargo run -- test/big.snek test/big.s
+=== Test 34: Runtime error — (add1 true) ===
+$ cat test/error/add1_bool.snek
+(add1 true)
+$ cargo run -- test/error/add1_bool.snek test/error/add1_bool.s
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
-     Running `target/debug/adder test/big.snek test/big.s`
+     Running `target/debug/cobra test/error/add1_bool.snek test/error/add1_bool.s`
 
-$ cat test/big.s
-section .text
-global our_code_starts_here
-our_code_starts_here:
-  mov rax, 2147483647
-  neg rax
-  sub rax, 1
-  add rax, 1
-  ret
-
-$ make test/big.run
-nasm -f macho64 test/big.s -o runtime/our_code.o
+$ make test/error/add1_bool.run
+nasm -f macho64 test/error/add1_bool.s -o runtime/our_code.o
 ar rcs runtime/libour_code.a runtime/our_code.o
-rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/big.run
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/error/add1_bool.run
 
-$ ./test/big.run
--2147483647
+$ ./test/error/add1_bool.run false
+invalid argument
+
+=== Test 35: Runtime error — (< true 1) ===
+$ cat test/error/cmp_bool.snek
+(< true 1)
+$ cargo run -- test/error/cmp_bool.snek test/error/cmp_bool.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/error/cmp_bool.snek test/error/cmp_bool.s`
+
+$ make test/error/cmp_bool.run
+nasm -f macho64 test/error/cmp_bool.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/error/cmp_bool.run
+
+$ ./test/error/cmp_bool.run false
+invalid argument
+
+=== Test 36: Runtime error — (= true 1) type mismatch ===
+$ cat test/error/eq_mismatch.snek
+(= true 1)
+$ cargo run -- test/error/eq_mismatch.snek test/error/eq_mismatch.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/error/eq_mismatch.snek test/error/eq_mismatch.s`
+
+$ make test/error/eq_mismatch.run
+nasm -f macho64 test/error/eq_mismatch.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/error/eq_mismatch.run
+
+$ ./test/error/eq_mismatch.run false
+invalid argument
+
+=== Test 37: Runtime error — overflow (+ 2147483647 1) ===
+$ cat test/error/overflow_add.snek
+(+ 2147483647 1)
+$ cargo run -- test/error/overflow_add.snek test/error/overflow_add.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/error/overflow_add.snek test/error/overflow_add.s`
+
+$ make test/error/overflow_add.run
+nasm -f macho64 test/error/overflow_add.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/error/overflow_add.run
+
+$ ./test/error/overflow_add.run false
+overflow
+
+=== Test 38: Runtime error — overflow (* 2147483647 2) ===
+$ cat test/error/overflow_mul.snek
+(* 2147483647 2)
+$ cargo run -- test/error/overflow_mul.snek test/error/overflow_mul.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/error/overflow_mul.snek test/error/overflow_mul.s`
+
+$ make test/error/overflow_mul.run
+nasm -f macho64 test/error/overflow_mul.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/error/overflow_mul.run
+
+$ ./test/error/overflow_mul.run false
+overflow
+
+=== Test 39: Runtime error — overflow (sub1 -2147483648) ===
+$ cat test/error/overflow_sub1.snek
+(sub1 -2147483648)
+
+$ cargo run -- test/error/overflow_sub1.snek test/error/overflow_sub1.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/error/overflow_sub1.snek test/error/overflow_sub1.s`
+
+$ make test/error/overflow_sub1.run
+nasm -f macho64 test/error/overflow_sub1.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/error/overflow_sub1.run
+
+$ ./test/error/overflow_sub1.run false
+overflow
+
+=== Test 40: Runtime error — overflow (negate -2147483648) ===
+$ cat test/error/overflow_negate.snek
+(negate -2147483648)
+
+$ cargo run -- test/error/overflow_negate.snek test/error/overflow_negate.s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running `target/debug/cobra test/error/overflow_negate.snek test/error/overflow_negate.s`
+
+$ make test/error/overflow_negate.run
+nasm -f macho64 test/error/overflow_negate.s -o runtime/our_code.o
+ar rcs runtime/libour_code.a runtime/our_code.o
+rustc --target x86_64-apple-darwin -L runtime runtime/start.rs -o test/error/overflow_negate.run
+
+$ ./test/error/overflow_negate.run false
+overflow
+

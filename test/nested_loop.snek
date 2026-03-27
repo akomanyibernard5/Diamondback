@@ -1,0 +1,14 @@
+(let ((i 0) (result 0))
+  (loop
+    (if (= i 3)
+      (break result)
+      (block
+        (set! result (+ result
+          (let ((j 0) (inner 0))
+            (loop
+              (if (= j 3)
+                (break inner)
+                (block
+                  (set! inner (+ inner 1))
+                  (set! j (+ j 1))))))))
+        (set! i (+ i 1))))))

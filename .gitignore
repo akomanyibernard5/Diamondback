@@ -1,1 +1,7 @@
 /target
+test/*.s
+test/*.run
+test/error/*.s
+test/error/*.run
+runtime/*.o
+runtime/*.a

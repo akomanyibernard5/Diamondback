@@ -1,0 +1,8 @@
+(let ((x 0))
+  (block
+    (set! x (+ x 1))
+    (set! x (* x 2))
+    (set! x (+ x 1))
+    (set! x (* x 2))
+    (set! x (+ x 1))
+    x))

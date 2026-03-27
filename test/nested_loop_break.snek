@@ -1,0 +1,5 @@
+(let ((outer 0))
+  (loop
+    (block
+      (set! outer (+ outer (loop (break 3))))
+      (if (>= outer 9) (break outer) outer))))

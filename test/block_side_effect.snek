@@ -1,0 +1,5 @@
+(let ((a 1) (b 2))
+  (block
+    (set! a (+ a b))
+    (set! b (* a b))
+    (- b a)))

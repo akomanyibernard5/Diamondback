@@ -1,0 +1,10 @@
+(let ((total 0))
+  (loop
+    (if (> total 20)
+      (break total)
+      (set! total (+ total
+        (let ((i 0) (s 0))
+          (loop
+            (if (= i 3)
+              (break s)
+              (block (set! s (+ s i)) (set! i (+ i 1)))))))))))
