@@ -1,0 +1,2 @@
+(fun (add3 x y z) (+ (+ x y) z))
+(add3 1 2 3)

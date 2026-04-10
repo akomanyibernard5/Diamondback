@@ -1,0 +1,5 @@
+(fun (is_even n)
+  (if (= n 0) true (is_odd (- n 1))))
+(fun (is_odd n)
+  (if (= n 0) false (is_even (- n 1))))
+(is_even 4)

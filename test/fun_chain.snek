@@ -1,0 +1,4 @@
+(fun (add1f x) (+ x 1))
+(fun (add2f x) (add1f (add1f x)))
+(fun (add4f x) (add2f (add2f x)))
+(add4f 10)

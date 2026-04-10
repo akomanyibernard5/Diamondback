@@ -1,0 +1,2 @@
+(fun (check_num x) (isnum x))
+(check_num 5)

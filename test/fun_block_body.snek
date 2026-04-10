@@ -1,0 +1,5 @@
+(fun (block_fn x)
+  (block
+    (add1 x)
+    (* x x)))
+(block_fn 4)

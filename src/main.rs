@@ -3,7 +3,7 @@ use sexp::Atom::*;
 use std::env;
 use std::fs::File;
 use std::io::prelude::*;
-use im::HashMap; // persistent map — O(1) clone for scoped environments
+use im::HashMap;
 
 // Tagged values: LSB distinguishes type
 //   Numbers: value << 1 (LSB = 0)
@@ -11,11 +11,10 @@ use im::HashMap; // persistent map — O(1) clone for scoped environments
 const TRUE:  i64 = 3;
 const FALSE: i64 = 1;
 
-// 64-bit arithmetic won't overflow for i32 inputs, so we range-check instead
 const TAGGED_MIN: i64 = (i32::MIN as i64) << 1;
 const TAGGED_MAX: i64 = (i32::MAX as i64) << 1;
 
-enum Op1 { Add1, Sub1, Negate, IsNum, IsBool }
+enum Op1 { Add1, Sub1, Negate, IsNum, IsBool, Print }
 enum Op2 { Plus, Minus, Times, Less, Greater, LessEq, GreaterEq, Equal }
 
 enum Expr {
@@ -31,11 +30,23 @@ enum Expr {
     Loop(Box<Expr>),
     Break(Box<Expr>),
     Set(String, Box<Expr>),
+    Call(String, Vec<Expr>),
+}
+
+struct Definition {
+    name: String,
+    params: Vec<String>,
+    body: Expr,
+}
+
+struct Program {
+    defns: Vec<Definition>,
+    main: Expr,
 }
 
 const RESERVED: &[&str] = &[
-    "let", "add1", "sub1", "negate", "isnum", "isbool",
-    "if", "block", "loop", "break", "set!", "true", "false", "input",
+    "let", "add1", "sub1", "negate", "isnum", "isbool", "print",
+    "if", "block", "loop", "break", "set!", "true", "false", "input", "fun",
 ];
 
 fn parse_expr(s: &Sexp) -> Expr {
@@ -57,6 +68,7 @@ fn parse_expr(s: &Sexp) -> Expr {
             [Sexp::Atom(S(op)), e] if op == "negate" => Expr::UnOp(Op1::Negate, Box::new(parse_expr(e))),
             [Sexp::Atom(S(op)), e] if op == "isnum"  => Expr::UnOp(Op1::IsNum,  Box::new(parse_expr(e))),
             [Sexp::Atom(S(op)), e] if op == "isbool" => Expr::UnOp(Op1::IsBool, Box::new(parse_expr(e))),
+            [Sexp::Atom(S(op)), e] if op == "print"  => Expr::UnOp(Op1::Print,  Box::new(parse_expr(e))),
 
             [Sexp::Atom(S(op)), e1, e2] if op == "+"  => Expr::BinOp(Op2::Plus,      Box::new(parse_expr(e1)), Box::new(parse_expr(e2))),
             [Sexp::Atom(S(op)), e1, e2] if op == "-"  => Expr::BinOp(Op2::Minus,     Box::new(parse_expr(e1)), Box::new(parse_expr(e2))),
@@ -88,6 +100,10 @@ fn parse_expr(s: &Sexp) -> Expr {
                 Expr::Block(rest.iter().map(parse_expr).collect())
             }
 
+            // Function call: (name arg*)
+            [Sexp::Atom(S(name)), args @ ..] if !RESERVED.contains(&name.as_str()) =>
+                Expr::Call(name.to_string(), args.iter().map(parse_expr).collect()),
+
             _ => panic!("Invalid"),
         },
         _ => panic!("Invalid"),
@@ -105,12 +121,57 @@ fn parse_bind(s: &Sexp) -> (String, Expr) {
     }
 }
 
+fn parse_defn(s: &Sexp) -> Option<Definition> {
+    match s {
+        Sexp::List(vec) => match &vec[..] {
+            [Sexp::Atom(S(kw)), Sexp::List(sig), body] if kw == "fun" => {
+                match &sig[..] {
+                    [Sexp::Atom(S(name)), params @ ..] => {
+                        let param_names: Vec<String> = params.iter().map(|p| match p {
+                            Sexp::Atom(S(n)) => {
+                                if RESERVED.contains(&n.as_str()) { panic!("Invalid") }
+                                n.clone()
+                            }
+                            _ => panic!("Invalid"),
+                        }).collect();
+                        // Check duplicate params
+                        let mut seen = std::collections::HashSet::new();
+                        for p in &param_names {
+                            if !seen.insert(p.clone()) { panic!("Duplicate binding") }
+                        }
+                        Some(Definition { name: name.clone(), params: param_names, body: parse_expr(body) })
+                    }
+                    _ => panic!("Invalid"),
+                }
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn parse_program(sexps: &[Sexp]) -> Program {
+    let mut defns = vec![];
+    let mut main_expr = None;
+    for s in sexps {
+        match parse_defn(s) {
+            Some(d) => {
+                if main_expr.is_some() { panic!("Invalid") }
+                defns.push(d);
+            }
+            None => {
+                if main_expr.is_some() { panic!("Invalid") }
+                main_expr = Some(parse_expr(s));
+            }
+        }
+    }
+    Program { defns, main: main_expr.expect("Invalid") }
+}
+
 fn new_label(lc: &mut i32, name: &str) -> String {
     *lc += 1;
     format!("{}_{}", name, lc)
 }
-
-// Error helpers — each emits: skip over error on success, error block, ok label
 
 fn assert_num_rax(instrs: &mut Vec<String>, lc: &mut i32) {
     let ok = new_label(lc, "ok_num");
@@ -130,17 +191,16 @@ fn assert_num_rbx(instrs: &mut Vec<String>, lc: &mut i32) {
     instrs.push(format!("{ok}:"));
 }
 
-fn assert_both_num(instrs: &mut Vec<String>, lc: &mut i32, stack_off: i32) {
+fn assert_both_num(instrs: &mut Vec<String>, lc: &mut i32, rbp_off: i32) {
     assert_num_rax(instrs, lc);
-    instrs.push(format!("mov rbx, [rsp{}]", stack_off));
+    instrs.push(format!("mov rbx, [rbp{}]", fmt_off(rbp_off)));
     assert_num_rbx(instrs, lc);
 }
 
-// For (=): XOR detects mixed tags — if bit 0 differs, types don't match
-fn assert_same_type(instrs: &mut Vec<String>, lc: &mut i32, stack_off: i32) {
+fn assert_same_type(instrs: &mut Vec<String>, lc: &mut i32, rbp_off: i32) {
     let ok = new_label(lc, "ok_same_type");
     instrs.push("mov rbx, rax".into());
-    instrs.push(format!("xor rbx, [rsp{}]", stack_off));
+    instrs.push(format!("xor rbx, [rbp{}]", fmt_off(rbp_off)));
     instrs.push("test rbx, 1".into());
     instrs.push(format!("jz {ok}"));
     instrs.push("mov rdi, 1".into());
@@ -148,7 +208,6 @@ fn assert_same_type(instrs: &mut Vec<String>, lc: &mut i32, stack_off: i32) {
     instrs.push(format!("{ok}:"));
 }
 
-// jo catches 64-bit overflow; range check catches i32 overflow that fits in 64 bits
 fn assert_no_overflow(instrs: &mut Vec<String>, lc: &mut i32) {
     let ok_64 = new_label(lc, "ok_no_ov64");
     instrs.push(format!("jno {ok_64}"));
@@ -173,8 +232,16 @@ fn assert_no_overflow(instrs: &mut Vec<String>, lc: &mut i32) {
     instrs.push(format!("{ok_lo}:"));
 }
 
-// si: next free stack slot (slot 1 = [rsp-8] reserved for input, so si starts at 2)
-// brk: break target label — replaced per loop so break hits the innermost one
+// Format a signed offset for memory addressing: +N, -N, or empty for 0
+fn fmt_off(off: i32) -> String {
+    if off > 0 { format!("+{off}") }
+    else if off < 0 { format!("{off}") }
+    else { String::new() }
+}
+
+// si: next free local slot index (1-based); locals live at [rbp - si*8]
+// env maps variable names to their rbp-relative byte offsets (negative = local, positive = param)
+// brk: innermost loop end label
 fn compile(
     e: &Expr,
     si: i32,
@@ -187,10 +254,11 @@ fn compile(
         Expr::Num(n) => instrs.push(format!("mov rax, {}", (*n as i64) << 1)),
         Expr::Bool(true)  => instrs.push(format!("mov rax, {TRUE}")),
         Expr::Bool(false) => instrs.push(format!("mov rax, {FALSE}")),
-        Expr::Input => instrs.push("mov rax, [rsp-8]".into()),
+        // input is stored at [rbp-8] (slot 1) in main
+        Expr::Input => instrs.push("mov rax, [rbp-8]".into()),
 
         Expr::Id(name) => match env.get(name) {
-            Some(off) => instrs.push(format!("mov rax, [rsp{}]", off)),
+            Some(off) => instrs.push(format!("mov rax, [rbp{}]", fmt_off(*off))),
             None => panic!("Unbound variable identifier {name}"),
         },
 
@@ -199,7 +267,7 @@ fn compile(
             match op {
                 Op1::Add1 => {
                     assert_num_rax(instrs, lc);
-                    instrs.push("add rax, 2".into()); // +1 in value = +2 in tagged
+                    instrs.push("add rax, 2".into());
                     assert_no_overflow(instrs, lc);
                 }
                 Op1::Sub1 => {
@@ -209,7 +277,7 @@ fn compile(
                 }
                 Op1::Negate => {
                     assert_num_rax(instrs, lc);
-                    instrs.push("neg rax".into()); // neg(n<<1) = (-n)<<1 in two's complement
+                    instrs.push("neg rax".into());
                     assert_no_overflow(instrs, lc);
                 }
                 Op1::IsNum => {
@@ -230,15 +298,23 @@ fn compile(
                     instrs.push(format!("mov rax, {FALSE}"));
                     instrs.push(format!("{end}:"));
                 }
+                Op1::Print => {
+                    // Align stack to 16 bytes before call: rsp must be 16-byte aligned at call site.
+                    // We save rax, align, call snek_print(rax), restore.
+                    instrs.push("mov rdi, rax".into());
+                    // sub rsp by 8 to align (rbp frame already pushed rbp so rsp is 8-misaligned here)
+                    instrs.push("sub rsp, 8".into());
+                    instrs.push("call snek_print".into());
+                    instrs.push("add rsp, 8".into());
+                }
             }
         }
 
         Expr::BinOp(op, e1, e2) => {
-            let off = -8 * si;
+            let off = -(8 * si); // rbp-relative offset for spill slot
 
-            // Spill left operand so right can use rax
             compile(e1, si, env, lc, brk, instrs);
-            instrs.push(format!("mov [rsp{}], rax", off));
+            instrs.push(format!("mov [rbp{}], rax", fmt_off(off)));
             compile(e2, si + 1, env, lc, brk, instrs);
 
             match op {
@@ -253,25 +329,22 @@ fn compile(
 
             match op {
                 Op2::Plus => {
-                    instrs.push(format!("add rax, [rsp{}]", off));
+                    instrs.push(format!("add rax, [rbp{}]", fmt_off(off)));
                     assert_no_overflow(instrs, lc);
                 }
                 Op2::Minus => {
-                    // Need left - right; left is on stack, right is in rax
                     instrs.push("mov rbx, rax".into());
-                    instrs.push(format!("mov rax, [rsp{}]", off));
+                    instrs.push(format!("mov rax, [rbp{}]", fmt_off(off)));
                     instrs.push("sub rax, rbx".into());
                     assert_no_overflow(instrs, lc);
                 }
                 Op2::Times => {
-                    // Untag one operand to avoid double-shift: b * (a<<1) = (a*b)<<1
                     instrs.push("sar rax, 1".into());
-                    instrs.push(format!("imul rax, [rsp{}]", off));
+                    instrs.push(format!("imul rax, [rbp{}]", fmt_off(off)));
                     assert_no_overflow(instrs, lc);
                 }
                 Op2::Less | Op2::Greater | Op2::LessEq | Op2::GreaterEq | Op2::Equal => {
-                    // Tagged cmp preserves ordering since both operands share the same tag
-                    instrs.push(format!("mov rbx, [rsp{}]", off));
+                    instrs.push(format!("mov rbx, [rbp{}]", fmt_off(off)));
                     instrs.push("cmp rbx, rax".into());
                     let jmp = match op {
                         Op2::Less      => "jl",
@@ -290,7 +363,6 @@ fn compile(
             }
         }
 
-        // Only false (tagged 1) takes the else branch; everything else is truthy
         Expr::If(cond, then_e, else_e) => {
             let else_lbl = new_label(lc, "if_else");
             let end_lbl  = new_label(lc, "if_end");
@@ -310,7 +382,6 @@ fn compile(
             }
         }
 
-        // Each loop gets its own end label, replacing any outer brk target
         Expr::Loop(body) => {
             let start = new_label(lc, "loop_start");
             let end   = new_label(lc, "loop_end");
@@ -331,7 +402,7 @@ fn compile(
         Expr::Set(name, e) => match env.get(name) {
             Some(off) => {
                 compile(e, si, env, lc, brk, instrs);
-                instrs.push(format!("mov [rsp{}], rax", off));
+                instrs.push(format!("mov [rbp{}], rax", fmt_off(*off)));
             }
             None => panic!("Unbound variable identifier {name}"),
         },
@@ -342,18 +413,180 @@ fn compile(
             let mut seen = std::collections::HashSet::new();
 
             for (name, expr) in bindings {
-                if !seen.insert(name.clone()) {
-                    panic!("Duplicate binding");
-                }
-                let off = -8 * curr_si;
+                if !seen.insert(name.clone()) { panic!("Duplicate binding") }
+                let off = -(8 * curr_si);
                 compile(expr, curr_si, &new_env, lc, brk, instrs);
-                instrs.push(format!("mov [rsp{}], rax", off));
+                instrs.push(format!("mov [rbp{}], rax", fmt_off(off)));
                 new_env = new_env.update(name.clone(), off);
                 curr_si += 1;
             }
 
             compile(body, curr_si, &new_env, lc, brk, instrs);
         }
+
+        Expr::Call(name, args) => {
+            // Validate arity against known definitions is done at compile time in compile_program.
+            // Push args right-to-left, then call, then clean up.
+            // Each arg is compiled with increasing si to avoid clobbering spill slots.
+            let n = args.len();
+
+            // Align: after push rbp + mov rbp,rsp the stack is 16-byte aligned at function entry.
+            // Each push rax is 8 bytes. We need rsp 16-byte aligned before the call instruction.
+            // Number of pushes = n args. If n is odd, add one extra 8-byte pad.
+            let pad = if n % 2 == 1 { 8usize } else { 0usize };
+            if pad > 0 {
+                instrs.push(format!("sub rsp, {pad}"));
+            }
+
+            for (i, arg) in args.iter().enumerate().rev() {
+                compile(arg, si + i as i32, env, lc, brk, instrs);
+                instrs.push("push rax".into());
+            }
+
+            instrs.push(format!("call fun_{name}"));
+
+            let cleanup = n * 8 + pad;
+            if cleanup > 0 {
+                instrs.push(format!("add rsp, {cleanup}"));
+            }
+        }
+    }
+}
+
+// Compute the maximum stack index (si) needed by an expression.
+// This determines how much space to reserve with sub rsp.
+fn max_si(e: &Expr, si: i32) -> i32 {
+    match e {
+        Expr::Num(_) | Expr::Bool(_) | Expr::Input | Expr::Id(_) => si,
+        Expr::UnOp(_, e) => max_si(e, si),
+        Expr::BinOp(_, e1, e2) => max_si(e1, si).max(max_si(e2, si + 1)).max(si + 1),
+        Expr::If(c, t, f) => max_si(c, si).max(max_si(t, si)).max(max_si(f, si)),
+        Expr::Block(es) => es.iter().map(|e| max_si(e, si)).max().unwrap_or(si),
+        Expr::Loop(e) => max_si(e, si),
+        Expr::Break(e) => max_si(e, si),
+        Expr::Set(_, e) => max_si(e, si),
+        Expr::Let(binds, body) => {
+            let mut depth = si;
+            let mut curr = si;
+            for (_, e) in binds {
+                depth = depth.max(max_si(e, curr));
+                curr += 1;
+            }
+            depth.max(max_si(body, curr))
+        }
+        Expr::Call(_, args) => args.iter().enumerate()
+            .map(|(i, a)| max_si(a, si + i as i32))
+            .max().unwrap_or(si),
+    }
+}
+
+fn compile_defn(defn: &Definition, lc: &mut i32) -> String {
+    let mut instrs = vec![];
+
+    // Build env: params at [rbp+16], [rbp+24], ...
+    let mut env: HashMap<String, i32> = HashMap::new();
+    for (i, param) in defn.params.iter().enumerate() {
+        env = env.update(param.clone(), 16 + i as i32 * 8);
+    }
+
+    // Locals start at si=1 ([rbp-8]); compute max depth to allocate
+    let depth = max_si(&defn.body, 1);
+    // Round up to 16-byte alignment so rsp stays 16-byte aligned after sub
+    let local_bytes = ((depth * 8) + 15) & !15;
+
+    compile(&defn.body, 1, &env, lc, &None, &mut instrs);
+
+    let body = instrs.join("\n  ");
+    format!(
+"fun_{}:
+  push rbp
+  mov rbp, rsp
+  sub rsp, {local_bytes}
+  {body}
+  add rsp, {local_bytes}
+  pop rbp
+  ret",
+        defn.name
+    )
+}
+
+fn compile_program(prog: &Program) -> String {
+    // Validate calls: check arity and that called functions exist
+    let func_arities: std::collections::HashMap<String, usize> = prog.defns.iter()
+        .map(|d| (d.name.clone(), d.params.len()))
+        .collect();
+    // Check for duplicate function names
+    {
+        let mut seen = std::collections::HashSet::new();
+        for d in &prog.defns {
+            if !seen.insert(d.name.clone()) { panic!("Duplicate binding") }
+        }
+    }
+
+    let mut lc = 0;
+    let mut parts = vec![];
+
+    for defn in &prog.defns {
+        validate_calls(&defn.body, &func_arities);
+        parts.push(compile_defn(defn, &mut lc));
+    }
+
+    validate_calls(&prog.main, &func_arities);
+
+    // Main entry: slot 1 ([rbp-8]) holds input, locals start at si=2
+    // slot 1 = input, locals start at 2; ensure at least 2 slots allocated
+    let main_depth = max_si(&prog.main, 2).max(2);
+    let main_bytes = ((main_depth * 8) + 15) & !15;
+    let mut main_instrs = vec![];
+    compile(&prog.main, 2, &HashMap::new(), &mut lc, &None, &mut main_instrs);
+    let main_body = main_instrs.join("\n  ");
+
+    parts.push(format!(
+"our_code_starts_here:
+  push rbp
+  mov rbp, rsp
+  sub rsp, {main_bytes}
+  mov [rbp-8], rdi
+  {main_body}
+  add rsp, {main_bytes}
+  pop rbp
+  ret"
+    ));
+
+    format!(
+"section .text
+extern snek_error
+extern snek_print
+global our_code_starts_here
+{}
+",
+        parts.join("\n\n")
+    )
+}
+
+fn validate_calls(e: &Expr, funcs: &std::collections::HashMap<String, usize>) {
+    match e {
+        Expr::Call(name, args) => {
+            match funcs.get(name) {
+                None => panic!("Unbound variable identifier {name}"),
+                Some(&arity) if arity != args.len() =>
+                    panic!("Invalid: wrong number of arguments for {name}"),
+                _ => {}
+            }
+            for a in args { validate_calls(a, funcs); }
+        }
+        Expr::UnOp(_, e) => validate_calls(e, funcs),
+        Expr::BinOp(_, e1, e2) => { validate_calls(e1, funcs); validate_calls(e2, funcs); }
+        Expr::If(c, t, f) => { validate_calls(c, funcs); validate_calls(t, funcs); validate_calls(f, funcs); }
+        Expr::Block(es) => { for e in es { validate_calls(e, funcs); } }
+        Expr::Loop(e) => validate_calls(e, funcs),
+        Expr::Break(e) => validate_calls(e, funcs),
+        Expr::Set(_, e) => validate_calls(e, funcs),
+        Expr::Let(binds, body) => {
+            for (_, e) in binds { validate_calls(e, funcs); }
+            validate_calls(body, funcs);
+        }
+        _ => {}
     }
 }
 
@@ -367,22 +600,16 @@ fn main() -> std::io::Result<()> {
     let mut src = String::new();
     File::open(&args[1])?.read_to_string(&mut src)?;
 
-    let expr = parse_expr(&parse(&src).unwrap());
-    let mut instrs = Vec::new();
-    let mut lc = 0;
-    compile(&expr, 2, &HashMap::new(), &mut lc, &None, &mut instrs);
-    let body = instrs.join("\n  ");
+    // Parse as a sequence of top-level s-expressions
+    let wrapped = format!("({})", src.trim());
+    let top = parse(&wrapped).expect("Invalid");
+    let sexps = match &top {
+        Sexp::List(v) => v.as_slice(),
+        _ => panic!("Invalid"),
+    };
 
-    let asm = format!(
-"section .text
-extern snek_error
-global our_code_starts_here
-our_code_starts_here:
-  mov [rsp-8], rdi
-  {body}
-  ret
-"
-    );
+    let prog = parse_program(sexps);
+    let asm = compile_program(&prog);
 
     File::create(&args[2])?.write_all(asm.as_bytes())?;
     Ok(())

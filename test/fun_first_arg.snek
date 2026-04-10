@@ -1,0 +1,2 @@
+(fun (first x y) x)
+(first 42 99)

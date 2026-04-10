@@ -1,0 +1,2 @@
+(fun (show x) (print x))
+(show 99)

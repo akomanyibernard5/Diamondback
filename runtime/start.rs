@@ -16,6 +16,18 @@ extern "C" fn snek_error(errcode: i64) {
     std::process::exit(1);
 }
 
+#[export_name = "\x01snek_print"]
+extern "C" fn snek_print(val: i64) -> i64 {
+    if val & 1 == 0 {
+        println!("{}", val >> 1);
+    } else if val == 3 {
+        println!("true");
+    } else if val == 1 {
+        println!("false");
+    }
+    val
+}
+
 fn parse_input(s: &str) -> i64 {
     match s {
         "true"  => 3,

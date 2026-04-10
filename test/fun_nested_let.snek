@@ -1,0 +1,6 @@
+(fun (nested_let x)
+  (let ((a (+ x 1)))
+    (let ((b (* a 2)))
+      (let ((c (- b 3)))
+        c))))
+(nested_let 5)

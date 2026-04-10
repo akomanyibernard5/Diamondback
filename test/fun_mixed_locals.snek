@@ -1,0 +1,5 @@
+(fun (mixed a b)
+  (let ((s (+ a b))
+        (p (* a b)))
+    (- s p)))
+(mixed 3 4)

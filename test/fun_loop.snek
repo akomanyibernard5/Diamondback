@@ -1,0 +1,7 @@
+(fun (count_up n)
+  (let ((x 0))
+    (loop
+      (if (= x n)
+        (break x)
+        (set! x (+ x 1))))))
+(count_up 7)
